@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<title>FPS Shooter</title>
+<style>
+body { margin:0; overflow:hidden; background:black; }
+#ui {
+  position:absolute;
+  top:10px;
+  left:10px;
+  color:white;
+  font-family:Arial;
+}
+#healthbar {
+  width:200px;
+  height:20px;
+  background:#333;
+  margin-top:5px;
+}
+#health {
+  height:100%;
+  width:100%;
+  background:red;
+}
+#crosshair {
+  position:absolute;
+  top:50%;
+  left:50%;
+  width:8px;
+  height:8px;
+  margin-left:-4px;
+  margin-top:-4px;
+  border:2px solid white;
+  border-radius:50%;
+}
+#start {
+  position:absolute;
+  top:50%;
+  width:100%;
+  text-align:center;
+  color:white;
+  font-size:24px;
+}
+</style>
+</head>
+<body>
+
+<div id="ui">
+Score: <span id="score">0</span>
+<div id="healthbar"><div id="health"></div></div>
+</div>
+<div id="crosshair"></div>
+<div id="start">Clique pour jouer</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+let scene=new THREE.Scene();
+let camera=new THREE.PerspectiveCamera(75,innerWidth/innerHeight,0.1,1000);
+let renderer=new THREE.WebGLRenderer();
+renderer.setSize(innerWidth,innerHeight);
+document.body.appendChild(renderer.domElement);
+
+scene.background=new THREE.Color(0x111111);
+scene.add(new THREE.HemisphereLight(0xffffff,0x444444,1));
+
+let floor=new THREE.Mesh(
+new THREE.PlaneGeometry(200,200),
+new THREE.MeshStandardMaterial({color:0x222222})
+);
+floor.rotation.x=-Math.PI/2;
+scene.add(floor);
+
+let walls=[];
+for(let i=-20;i<=20;i+=2){
+for(let j=-20;j<=20;j+=2){
+if(Math.random()<0.15){
+let box=new THREE.Mesh(
+new THREE.BoxGeometry(2,2,2),
+new THREE.MeshStandardMaterial({color:0x00ffcc})
+);
+box.position.set(i,1,j);
+scene.add(box);
+walls.push(box);
+}}}
+
+camera.position.set(0,1.5,5);
+
+let move={f:false,b:false,l:false,r:false};
+let yaw=0,pitch=0;
+let speed=0.12;
+let radius=0.5;
+let health=100;
+let score=0;
+
+let playerBullets=[];
+let enemyBullets=[];
+let enemies=[];
+
+document.addEventListener('keydown',e=>{
+if(e.code==='KeyW')move.f=true;
+if(e.code==='KeyS')move.b=true;
+if(e.code==='KeyA')move.l=true;
+if(e.code==='KeyD')move.r=true;
+});
+document.addEventListener('keyup',e=>{
+if(e.code==='KeyW')move.f=false;
+if(e.code==='KeyS')move.b=false;
+if(e.code==='KeyA')move.l=false;
+if(e.code==='KeyD')move.r=false;
+});
+
+document.body.addEventListener('click',()=>renderer.domElement.requestPointerLock());
+
+document.addEventListener('pointerlockchange',()=>{
+document.getElementById("start").style.display=
+document.pointerLockElement===renderer.domElement?"none":"block";
+});
+
+document.addEventListener('mousemove',e=>{
+if(document.pointerLockElement!==renderer.domElement)return;
+yaw-=e.movementX*0.002;
+pitch-=e.movementY*0.002;
+pitch=Math.max(-Math.PI/2+0.1,Math.min(Math.PI/2-0.1,pitch));
+camera.rotation.order="YXZ";
+camera.rotation.y=yaw;
+camera.rotation.x=pitch;
+});
+
+function collide(newPos){
+for(let w of walls){
+let dx=Math.abs(newPos.x-w.position.x);
+let dz=Math.abs(newPos.z-w.position.z);
+if(dx<1+radius && dz<1+radius)return true;
+}
+return false;
+}
+
+function spawnEnemy(){
+let e=new THREE.Mesh(
+new THREE.BoxGeometry(1,1,1),
+new THREE.MeshStandardMaterial({color:0xff0000})
+);
+e.position.set((Math.random()-0.5)*30,0.5,(Math.random()-0.5)*30);
+e.shootCooldown=0;
+scene.add(e);
+enemies.push(e);
+}
+for(let i=0;i<5;i++)spawnEnemy();
+
+// PLAYER SHOOT (VISIBLE BULLETS)
+document.addEventListener('mousedown',()=>{
+let bullet=new THREE.Mesh(
+new THREE.SphereGeometry(0.2,8,8),
+new THREE.MeshBasicMaterial({color:0xffffff})
+);
+bullet.position.copy(camera.position);
+
+let direction=new THREE.Vector3();
+camera.getWorldDirection(direction);
+bullet.velocity=direction.clone().multiplyScalar(0.5);
+
+scene.add(bullet);
+playerBullets.push(bullet);
+});
+
+function animate(){
+requestAnimationFrame(animate);
+
+// Movement FIXED (W forward, S backward)
+let dir=new THREE.Vector3();
+if(move.f)dir.z+=1;
+if(move.b)dir.z-=1;
+if(move.l)dir.x-=1;
+if(move.r)dir.x+=1;
+dir.normalize();
+
+let forward=new THREE.Vector3(Math.sin(yaw),0,Math.cos(yaw));
+let right=new THREE.Vector3(forward.z,0,-forward.x);
+
+let moveVec=new THREE.Vector3();
+moveVec.addScaledVector(forward,dir.z);
+moveVec.addScaledVector(right,dir.x);
+moveVec.multiplyScalar(speed);
+
+let newPos=camera.position.clone().add(moveVec);
+if(!collide(newPos))camera.position.copy(newPos);
+
+// Update player bullets
+for(let b of playerBullets){
+b.position.add(b.velocity);
+
+// Collision with enemies
+for(let e of enemies){
+if(b.position.distanceTo(e.position)<1){
+scene.remove(e);
+scene.remove(b);
+enemies.splice(enemies.indexOf(e),1);
+playerBullets.splice(playerBullets.indexOf(b),1);
+score++;
+document.getElementById("score").textContent=score;
+spawnEnemy();
+break;
+}
+}
+}
+
+// Enemy logic
+for(let e of enemies){
+let dirToPlayer=new THREE.Vector3().subVectors(camera.position,e.position);
+let distance=dirToPlayer.length();
+dirToPlayer.y=0;
+dirToPlayer.normalize();
+
+if(distance>3)e.position.addScaledVector(dirToPlayer,0.03);
+
+e.shootCooldown--;
+if(e.shootCooldown<=0 && distance<15){
+let bullet=new THREE.Mesh(
+new THREE.SphereGeometry(0.2,8,8),
+new THREE.MeshBasicMaterial({color:0xffff00})
+);
+bullet.position.copy(e.position);
+bullet.velocity=dirToPlayer.clone().multiplyScalar(0.3);
+scene.add(bullet);
+enemyBullets.push(bullet);
+e.shootCooldown=120;
+}
+}
+
+// Update enemy bullets
+for(let b of enemyBullets){
+b.position.add(b.velocity);
+if(b.position.distanceTo(camera.position)<1){
+health-=10;
+document.getElementById("health").style.width=health+"%";
+scene.remove(b);
+enemyBullets.splice(enemyBullets.indexOf(b),1);
+if(health<=0){
+alert("GAME OVER");
+location.reload();
+}
+}
+}
+
+renderer.render(scene,camera);
+}
+animate();
+
+addEventListener('resize',()=>{
+camera.aspect=innerWidth/innerHeight;
+camera.updateProjectionMatrix();
+renderer.setSize(innerWidth,innerHeight);
+});
+</script>
+</body>
+</html>
